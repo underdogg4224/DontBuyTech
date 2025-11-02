@@ -6,6 +6,7 @@
 import { db } from '../index';
 import { votes, deals } from '../schema';
 import { eq, and, sql } from 'drizzle-orm';
+import { recalculateDealRanking, clearRankingCache } from './deals';
 
 /**
  * Vote type enum
@@ -283,6 +284,7 @@ export async function getVotesByDeal(dealId: string): Promise<VoteResult[]> {
 /**
  * Update deal's vote count
  * Internal helper to synchronize vote count on deals table
+ * Also triggers enhanced ranking recalculation
  *
  * @param dealId - Deal UUID
  */
@@ -294,6 +296,16 @@ async function updateDealVoteCount(dealId: string): Promise<void> {
       .update(deals)
       .set({ votes_count: voteCount.total })
       .where(eq(deals.id, dealId));
+
+    // Clear cache and trigger ranking recalculation
+    // This happens asynchronously to not block vote operations
+    clearRankingCache(dealId);
+
+    // Recalculate ranking in background (don't await to avoid blocking)
+    recalculateDealRanking(dealId).catch(error => {
+      console.error(`Background ranking recalculation failed for deal ${dealId}:`, error);
+      // Non-critical error, don't throw
+    });
   } catch (error) {
     console.error(`Error updating vote count for deal ${dealId}:`, error);
     throw new Error(`Failed to update vote count for deal ${dealId}`);

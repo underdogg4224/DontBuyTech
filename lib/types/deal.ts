@@ -30,6 +30,30 @@ export type DealCategory =
   | 'other';
 
 /**
+ * Archive reason enumeration
+ */
+export type ArchiveReason = 'expired' | 'broken_link' | 'low_quality' | 'downvoted';
+
+/**
+ * Ranking metadata structure
+ * Stores detailed ranking calculation factors
+ */
+export interface RankingMetadata {
+  /** AI quality score component */
+  ai_quality_component?: number;
+  /** Recency score component */
+  recency_component?: number;
+  /** Popularity score component */
+  popularity_component?: number;
+  /** Final calculated rank */
+  final_rank?: number;
+  /** Timestamp when ranking was calculated */
+  calculated_at?: string;
+  /** Additional debug information */
+  [key: string]: any;
+}
+
+/**
  * Core Deal interface
  * Represents a deal/product in the database
  */
@@ -66,6 +90,20 @@ export interface Deal {
   archived: boolean;
   /** Vector embedding for semantic search (pgvector) */
   embedding: number[] | null;
+
+  // Phase 2: AI Features
+  /** AI-generated summary of the deal */
+  summary: string | null;
+  /** AI quality assessment score (0-100) */
+  ai_quality_score: number | null;
+  /** Timestamp when AI summary was generated */
+  summarized_at: Date | string | null;
+  /** Timestamp when deal was archived */
+  archived_at: Date | string | null;
+  /** Reason for archiving the deal */
+  archive_reason: ArchiveReason | null;
+  /** Detailed ranking calculation metadata */
+  ranking_metadata: RankingMetadata | null;
 }
 
 /**

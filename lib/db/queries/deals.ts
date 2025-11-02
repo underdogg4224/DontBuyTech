@@ -1,11 +1,18 @@
 /**
  * Deal queries
- * Reusable database queries for deals with ranking algorithm
+ * Reusable database queries for deals with enhanced ranking algorithm
  */
 
 import { db } from '../index';
 import { deals } from '../schema';
 import { eq, desc, asc, and, sql, SQL } from 'drizzle-orm';
+import { getVoteCount } from './votes';
+import {
+  calculateDealRanking,
+  calculateBatchRankings,
+  type RankingInput,
+  type RankingOutput,
+} from '../../ranking';
 
 /**
  * Options for deal queries
@@ -15,6 +22,55 @@ export interface DealQueryOptions {
   offset?: number;
   sortBy?: 'score' | 'created_at' | 'price';
   sortOrder?: 'asc' | 'desc';
+}
+
+/**
+ * Simple in-memory cache for ranking calculations
+ * Cache entries expire after 5 minutes
+ */
+interface RankingCacheEntry {
+  ranking: RankingOutput;
+  cachedAt: number;
+}
+
+const RANKING_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+const rankingCache = new Map<string, RankingCacheEntry>();
+
+/**
+ * Get cached ranking if available and not expired
+ */
+function getCachedRanking(dealId: string): RankingOutput | null {
+  const entry = rankingCache.get(dealId);
+  if (!entry) return null;
+
+  const now = Date.now();
+  if (now - entry.cachedAt > RANKING_CACHE_TTL) {
+    rankingCache.delete(dealId);
+    return null;
+  }
+
+  return entry.ranking;
+}
+
+/**
+ * Cache a ranking calculation
+ */
+function cacheRanking(dealId: string, ranking: RankingOutput): void {
+  rankingCache.set(dealId, {
+    ranking,
+    cachedAt: Date.now(),
+  });
+}
+
+/**
+ * Clear ranking cache for a specific deal
+ */
+export function clearRankingCache(dealId?: string): void {
+  if (dealId) {
+    rankingCache.delete(dealId);
+  } else {
+    rankingCache.clear();
+  }
 }
 
 /**
@@ -45,13 +101,26 @@ const scoreSQL = sql<number>`
  *
  * @param categoryId - Category UUID
  * @param limit - Number of deals to return (default: 10)
+ * @param useEnhancedRanking - Whether to use enhanced ranking algorithm (default: false for compatibility)
  * @returns Array of top-ranked deals with calculated score
  */
 export async function getTopDealsByCategory(
   categoryId: string,
-  limit: number = 10
+  limit: number = 10,
+  useEnhancedRanking: boolean = false
 ) {
   try {
+    if (useEnhancedRanking) {
+      // Use enhanced ranking algorithm
+      const results = await getDealsWithEnhancedRanking({
+        categoryId,
+        limit,
+        offset: 0,
+      });
+      return results;
+    }
+
+    // Use legacy ranking for backward compatibility
     const results = await db
       .select({
         id: deals.id,
@@ -68,6 +137,12 @@ export async function getTopDealsByCategory(
         created_at: deals.created_at,
         expires_at: deals.expires_at,
         archived: deals.archived,
+        summary: deals.summary,
+        ai_quality_score: deals.ai_quality_score,
+        summarized_at: deals.summarized_at,
+        archived_at: deals.archived_at,
+        archive_reason: deals.archive_reason,
+        ranking_metadata: deals.ranking_metadata,
         calculated_score: scoreSQL,
       })
       .from(deals)
@@ -112,6 +187,12 @@ export async function getDealById(id: string) {
         created_at: deals.created_at,
         expires_at: deals.expires_at,
         archived: deals.archived,
+        summary: deals.summary,
+        ai_quality_score: deals.ai_quality_score,
+        summarized_at: deals.summarized_at,
+        archived_at: deals.archived_at,
+        archive_reason: deals.archive_reason,
+        ranking_metadata: deals.ranking_metadata,
         calculated_score: scoreSQL,
       })
       .from(deals)
@@ -134,7 +215,7 @@ export async function getDealById(id: string) {
  */
 export async function getDealsByCategory(
   categoryId: string,
-  options: DealQueryOptions = {}
+  options: DealQueryOptions & { useEnhancedRanking?: boolean } = {}
 ) {
   try {
     const {
@@ -142,8 +223,19 @@ export async function getDealsByCategory(
       offset = 0,
       sortBy = 'score',
       sortOrder = 'desc',
+      useEnhancedRanking = false,
     } = options;
 
+    // If sorting by score and enhanced ranking is enabled, use enhanced algorithm
+    if (sortBy === 'score' && useEnhancedRanking) {
+      return await getDealsWithEnhancedRanking({
+        categoryId,
+        limit,
+        offset,
+      });
+    }
+
+    // Use legacy SQL-based ranking for backward compatibility
     // Determine sorting column
     let orderByColumn: SQL | typeof deals.created_at | typeof deals.price;
     switch (sortBy) {
@@ -176,6 +268,12 @@ export async function getDealsByCategory(
         created_at: deals.created_at,
         expires_at: deals.expires_at,
         archived: deals.archived,
+        summary: deals.summary,
+        ai_quality_score: deals.ai_quality_score,
+        summarized_at: deals.summarized_at,
+        archived_at: deals.archived_at,
+        archive_reason: deals.archive_reason,
+        ranking_metadata: deals.ranking_metadata,
         calculated_score: scoreSQL,
       })
       .from(deals)
@@ -247,6 +345,12 @@ export async function getArchivedDeals(options: DealQueryOptions = {}) {
         created_at: deals.created_at,
         expires_at: deals.expires_at,
         archived: deals.archived,
+        summary: deals.summary,
+        ai_quality_score: deals.ai_quality_score,
+        summarized_at: deals.summarized_at,
+        archived_at: deals.archived_at,
+        archive_reason: deals.archive_reason,
+        ranking_metadata: deals.ranking_metadata,
       })
       .from(deals)
       .where(eq(deals.archived, true))
@@ -290,6 +394,12 @@ export async function getTopDeals(limit: number = 20) {
         created_at: deals.created_at,
         expires_at: deals.expires_at,
         archived: deals.archived,
+        summary: deals.summary,
+        ai_quality_score: deals.ai_quality_score,
+        summarized_at: deals.summarized_at,
+        archived_at: deals.archived_at,
+        archive_reason: deals.archive_reason,
+        ranking_metadata: deals.ranking_metadata,
         calculated_score: scoreSQL,
       })
       .from(deals)
@@ -305,8 +415,9 @@ export async function getTopDeals(limit: number = 20) {
 }
 
 /**
- * Update deal score in database
+ * Update deal score in database (legacy)
  * Should be called after vote changes
+ * @deprecated Use calculateAndStoreRanking instead for enhanced ranking
  *
  * @param dealId - Deal UUID
  * @param votesCount - Current vote count
@@ -332,5 +443,304 @@ export async function updateDealScore(
   } catch (error) {
     console.error(`Error updating deal score for ${dealId}:`, error);
     throw new Error(`Failed to update score for deal ${dealId}`);
+  }
+}
+
+// ============================================================================
+// ENHANCED RANKING FUNCTIONS
+// ============================================================================
+
+/**
+ * Calculate and store enhanced ranking for a deal
+ * Fetches all necessary data, calculates ranking, and updates database
+ *
+ * @param dealId - Deal UUID
+ * @returns Updated ranking output
+ */
+export async function calculateAndStoreRanking(
+  dealId: string
+): Promise<RankingOutput> {
+  try {
+    // Check cache first
+    const cached = getCachedRanking(dealId);
+    if (cached) {
+      return cached;
+    }
+
+    // Fetch deal data
+    const deal = await db
+      .select({
+        id: deals.id,
+        created_at: deals.created_at,
+        ai_quality_score: deals.ai_quality_score,
+        discount_percentage: deals.discount_percentage,
+      })
+      .from(deals)
+      .where(eq(deals.id, dealId))
+      .limit(1);
+
+    if (!deal[0]) {
+      throw new Error(`Deal ${dealId} not found`);
+    }
+
+    const dealData = deal[0];
+
+    // Fetch vote counts
+    const voteCount = await getVoteCount(dealId);
+
+    // Prepare ranking input
+    const rankingInput: RankingInput = {
+      dealId,
+      upvotes: voteCount.upvotes,
+      downvotes: voteCount.downvotes,
+      createdAt: new Date(dealData.created_at),
+      aiQualityScore: dealData.ai_quality_score ?? 50, // Default to 50 if missing
+      categoryPopularity: 0, // TODO: Calculate category popularity
+      discountPercentage: dealData.discount_percentage,
+    };
+
+    // Calculate ranking
+    const ranking = calculateDealRanking(rankingInput);
+
+    // Update database with new score and metadata
+    await db
+      .update(deals)
+      .set({
+        score: ranking.finalScore,
+        ranking_metadata: ranking.metadata,
+      })
+      .where(eq(deals.id, dealId));
+
+    // Cache the result
+    cacheRanking(dealId, ranking);
+
+    return ranking;
+  } catch (error) {
+    console.error(`Error calculating ranking for deal ${dealId}:`, error);
+    throw new Error(`Failed to calculate ranking for deal ${dealId}`);
+  }
+}
+
+/**
+ * Recalculate deal ranking (alias for calculateAndStoreRanking)
+ * Useful for background jobs that update rankings after vote changes
+ *
+ * @param dealId - Deal UUID
+ * @returns Updated ranking output
+ */
+export async function recalculateDealRanking(
+  dealId: string
+): Promise<RankingOutput> {
+  // Clear cache to force recalculation
+  clearRankingCache(dealId);
+  return calculateAndStoreRanking(dealId);
+}
+
+/**
+ * Get deals with enhanced ranking
+ * Fetches deals, calculates rankings, and sorts by final score
+ *
+ * @param options - Query options with pagination and filtering
+ * @returns Array of deals with calculated rankings
+ */
+export async function getDealsWithEnhancedRanking(
+  options: DealQueryOptions & { categoryId?: string } = {}
+) {
+  try {
+    const { limit = 20, offset = 0, categoryId } = options;
+
+    // Build where clause
+    const whereConditions = [eq(deals.archived, false)];
+    if (categoryId) {
+      whereConditions.push(eq(deals.category_id, categoryId));
+    }
+
+    // Fetch deals with all ranking-relevant fields
+    const dealResults = await db
+      .select({
+        id: deals.id,
+        title: deals.title,
+        description: deals.description,
+        price: deals.price,
+        original_price: deals.original_price,
+        discount_percentage: deals.discount_percentage,
+        url: deals.url,
+        image_url: deals.image_url,
+        category_id: deals.category_id,
+        brand: deals.brand,
+        votes_count: deals.votes_count,
+        created_at: deals.created_at,
+        expires_at: deals.expires_at,
+        archived: deals.archived,
+        summary: deals.summary,
+        ai_quality_score: deals.ai_quality_score,
+        summarized_at: deals.summarized_at,
+        archived_at: deals.archived_at,
+        archive_reason: deals.archive_reason,
+        score: deals.score,
+        ranking_metadata: deals.ranking_metadata,
+      })
+      .from(deals)
+      .where(and(...whereConditions));
+
+    // Calculate rankings for all deals
+    const dealsWithRankings = await Promise.all(
+      dealResults.map(async (deal) => {
+        // Get vote counts
+        const voteCount = await getVoteCount(deal.id);
+
+        // Prepare ranking input
+        const rankingInput: RankingInput = {
+          dealId: deal.id,
+          upvotes: voteCount.upvotes,
+          downvotes: voteCount.downvotes,
+          createdAt: new Date(deal.created_at),
+          aiQualityScore: deal.ai_quality_score ?? 50,
+          categoryPopularity: 0, // TODO: Calculate category popularity
+          discountPercentage: deal.discount_percentage,
+        };
+
+        // Calculate ranking
+        const ranking = calculateDealRanking(rankingInput);
+
+        return {
+          ...deal,
+          calculated_score: ranking.finalScore,
+          ranking,
+        };
+      })
+    );
+
+    // Sort by final score (descending)
+    dealsWithRankings.sort((a, b) => b.ranking.finalScore - a.ranking.finalScore);
+
+    // Apply pagination
+    const paginatedResults = dealsWithRankings.slice(offset, offset + limit);
+
+    return paginatedResults;
+  } catch (error) {
+    console.error('Error fetching deals with enhanced ranking:', error);
+    throw new Error('Failed to fetch deals with enhanced ranking');
+  }
+}
+
+/**
+ * Batch recalculate rankings for multiple deals
+ * Optimized for background jobs
+ *
+ * @param dealIds - Array of deal UUIDs
+ * @returns Array of updated rankings
+ */
+export async function batchRecalculateRankings(
+  dealIds?: string[]
+): Promise<RankingOutput[]> {
+  try {
+    // If no deal IDs provided, fetch all active deals
+    let dealsToProcess = dealIds;
+
+    if (!dealsToProcess) {
+      const allDeals = await db
+        .select({ id: deals.id })
+        .from(deals)
+        .where(eq(deals.archived, false));
+
+      dealsToProcess = allDeals.map(d => d.id);
+    }
+
+    // Process deals in batches of 50 to avoid memory issues
+    const BATCH_SIZE = 50;
+    const results: RankingOutput[] = [];
+
+    for (let i = 0; i < dealsToProcess.length; i += BATCH_SIZE) {
+      const batchIds = dealsToProcess.slice(i, i + BATCH_SIZE);
+
+      // Fetch batch data
+      const batchDeals = await db
+        .select({
+          id: deals.id,
+          created_at: deals.created_at,
+          ai_quality_score: deals.ai_quality_score,
+          discount_percentage: deals.discount_percentage,
+        })
+        .from(deals)
+        .where(and(
+          eq(deals.archived, false),
+          sql`${deals.id} = ANY(${batchIds})`
+        ));
+
+      // Calculate rankings for batch
+      const batchRankings = await Promise.all(
+        batchDeals.map(async (deal) => {
+          try {
+            // Get vote counts
+            const voteCount = await getVoteCount(deal.id);
+
+            // Prepare ranking input
+            const rankingInput: RankingInput = {
+              dealId: deal.id,
+              upvotes: voteCount.upvotes,
+              downvotes: voteCount.downvotes,
+              createdAt: new Date(deal.created_at),
+              aiQualityScore: deal.ai_quality_score ?? 50,
+              categoryPopularity: 0, // TODO: Calculate category popularity
+              discountPercentage: deal.discount_percentage,
+            };
+
+            // Calculate ranking
+            const ranking = calculateDealRanking(rankingInput);
+
+            // Update database
+            await db
+              .update(deals)
+              .set({
+                score: ranking.finalScore,
+                ranking_metadata: ranking.metadata,
+              })
+              .where(eq(deals.id, deal.id));
+
+            // Clear cache
+            clearRankingCache(deal.id);
+
+            return ranking;
+          } catch (error) {
+            console.error(`Error processing deal ${deal.id} in batch:`, error);
+            // Continue processing other deals even if one fails
+            return null;
+          }
+        })
+      );
+
+      // Filter out failed rankings and add to results
+      results.push(...batchRankings.filter((r): r is RankingOutput => r !== null));
+
+      // Log progress
+      console.log(`Processed ${Math.min(i + BATCH_SIZE, dealsToProcess.length)} / ${dealsToProcess.length} deals`);
+    }
+
+    return results;
+  } catch (error) {
+    console.error('Error in batch recalculate rankings:', error);
+    throw new Error('Failed to batch recalculate rankings');
+  }
+}
+
+/**
+ * Recalculate all rankings for all active deals
+ * Background job function for periodic ranking updates
+ *
+ * @returns Number of deals processed
+ */
+export async function recalculateAllRankings(): Promise<number> {
+  try {
+    console.log('Starting recalculation of all rankings...');
+
+    const results = await batchRecalculateRankings();
+
+    console.log(`Successfully recalculated rankings for ${results.length} deals`);
+
+    return results.length;
+  } catch (error) {
+    console.error('Error recalculating all rankings:', error);
+    throw new Error('Failed to recalculate all rankings');
   }
 }

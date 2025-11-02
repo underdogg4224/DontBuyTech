@@ -3,7 +3,7 @@
 import { useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
-import { ArrowUp, ArrowDown, ExternalLink } from "lucide-react";
+import { ArrowUp, ArrowDown, ExternalLink, Sparkles } from "lucide-react";
 import { Card, CardContent, CardFooter, CardHeader } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -38,6 +38,22 @@ function formatPrice(price: number): string {
     style: 'currency',
     currency: 'USD',
   }).format(price);
+}
+
+/**
+ * Get quality score badge variant based on score
+ */
+function getQualityScoreVariant(score: number): {
+  variant: "default" | "secondary" | "destructive" | "outline";
+  className: string;
+} {
+  if (score >= 80) {
+    return { variant: "default", className: "bg-green-100 text-green-800 border-green-300 hover:bg-green-100" };
+  } else if (score >= 50) {
+    return { variant: "secondary", className: "bg-yellow-100 text-yellow-800 border-yellow-300 hover:bg-yellow-100" };
+  } else {
+    return { variant: "destructive", className: "bg-red-100 text-red-800 border-red-300 hover:bg-red-100" };
+  }
 }
 
 /**
@@ -160,6 +176,32 @@ export function DealCard({ deal, onVote, className }: DealCardProps) {
             {deal.title}
           </h3>
         </div>
+
+        {/* AI Summary Section */}
+        {deal.summary && (
+          <div className="space-y-1.5">
+            <div className="flex items-center gap-1.5">
+              <Badge variant="outline" className="gap-1 text-xs font-normal">
+                <Sparkles className="h-3 w-3" />
+                AI Summary
+              </Badge>
+              {deal.ai_quality_score !== null && (
+                <Badge
+                  variant="outline"
+                  className={cn(
+                    "text-xs font-normal",
+                    getQualityScoreVariant(deal.ai_quality_score).className
+                  )}
+                >
+                  {Math.round(deal.ai_quality_score)}
+                </Badge>
+              )}
+            </div>
+            <p className="line-clamp-3 text-sm italic text-muted-foreground">
+              {deal.summary}
+            </p>
+          </div>
+        )}
 
         {/* Brand and Category */}
         <div className="flex flex-wrap items-center gap-2">

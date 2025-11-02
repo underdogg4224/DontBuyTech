@@ -1,4 +1,4 @@
-import { pgTable, uuid, varchar, text, timestamp, integer, decimal, boolean, real, index, vector } from 'drizzle-orm/pg-core';
+import { pgTable, uuid, varchar, text, timestamp, integer, decimal, boolean, real, index, vector, jsonb } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
 import { categories } from './categories';
 
@@ -66,6 +66,27 @@ export const deals = pgTable(
 
     // AI/Semantic search (pgvector)
     embedding: vector('embedding', { dimensions: 1536 }),
+
+    // AI Features - Phase 2
+    // AI-generated summary of the deal
+    summary: text('summary'),
+
+    // AI quality assessment score (0-100)
+    ai_quality_score: integer('ai_quality_score'),
+
+    // Timestamp when AI summary was generated
+    summarized_at: timestamp('summarized_at', { mode: 'date', withTimezone: true }),
+
+    // Archiving metadata
+    // Timestamp when deal was archived (null if not archived)
+    archived_at: timestamp('archived_at', { mode: 'date', withTimezone: true }),
+
+    // Reason for archiving: 'expired', 'broken_link', 'low_quality', 'downvoted'
+    archive_reason: varchar('archive_reason', { length: 50 }),
+
+    // JSON metadata for ranking algorithm calculations
+    // Stores detailed ranking factors for transparency and debugging
+    ranking_metadata: jsonb('ranking_metadata'),
   },
   (table) => ({
     // Individual indexes for common queries
@@ -77,5 +98,16 @@ export const deals = pgTable(
     // Composite index for most common query pattern (active deals by category sorted by score)
     activeCategoryScoreIdx: index('deals_active_category_score_idx')
       .on(table.archived, table.category_id, table.score),
+
+    // Phase 2: AI features indexes
+    // Index for filtering by archived_at timestamp
+    archivedAtIdx: index('deals_archived_at_idx').on(table.archived_at),
+
+    // Index for AI quality score queries
+    aiQualityScoreIdx: index('deals_ai_quality_score_idx').on(table.ai_quality_score),
+
+    // Composite index for enhanced ranking (AI score + recency + popularity)
+    aiRankingIdx: index('deals_ai_ranking_idx')
+      .on(table.ai_quality_score, table.created_at, table.votes_count),
   })
 )

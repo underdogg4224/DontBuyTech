@@ -132,6 +132,8 @@ export default async function DealPage({ params }: DealPageProps) {
     // Transform deal data to DealWithVotes format for voting component
     const dealWithVotes: DealWithVotes = {
       ...deal,
+      archive_reason: deal.archive_reason as 'expired' | 'broken_link' | 'low_quality' | 'downvoted' | null,
+      ranking_metadata: deal.ranking_metadata as any,
       price: parseFloat(String(deal.price)),
       original_price: deal.original_price ? parseFloat(String(deal.original_price)) : null,
       upvotes: voteCount.upvotes,

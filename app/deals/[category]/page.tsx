@@ -143,6 +143,12 @@ export default async function CategoryPage({
                   created_at: deal.created_at,
                   expires_at: deal.expires_at,
                   archived: deal.archived,
+                  summary: deal.summary,
+                  ai_quality_score: deal.ai_quality_score,
+                  summarized_at: deal.summarized_at,
+                  archived_at: deal.archived_at,
+                  archive_reason: deal.archive_reason as 'expired' | 'broken_link' | 'low_quality' | 'downvoted' | null,
+                  ranking_metadata: deal.ranking_metadata as any,
                   embedding: null,
                   upvotes: 0, // TODO: Add vote aggregation query
                   downvotes: 0,
