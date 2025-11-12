@@ -1,0 +1,157 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// User model for tracking individual users
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  name      String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  devices          Device[]
+  avoidedPurchases AvoidedPurchase[]
+  userChallenges   UserChallenge[]
+  achievements     UserAchievement[]
+  goals            Goal[]
+}
+
+// Tech devices users currently own
+model Device {
+  id           String   @id @default(cuid())
+  userId       String
+  name         String
+  category     String // phone, laptop, tablet, smartwatch, etc.
+  purchaseDate DateTime?
+  cost         Float?
+  status       String   @default("active") // active, sold, donated, recycled
+  notes        String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+// Purchases that users avoided
+model AvoidedPurchase {
+  id          String   @id @default(cuid())
+  userId      String
+  itemName    String
+  category    String
+  estimatedCost Float
+  avoidedDate DateTime @default(now())
+  reason      String?
+  notes       String?
+  createdAt   DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([avoidedDate])
+}
+
+// Community challenges
+model Challenge {
+  id          String   @id @default(cuid())
+  name        String
+  description String
+  duration    Int      // in days
+  type        String   // no_purchases, device_reduction, mindful_usage
+  difficulty  String   // easy, medium, hard
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  participants UserChallenge[]
+}
+
+// Users participating in challenges
+model UserChallenge {
+  id          String   @id @default(cuid())
+  userId      String
+  challengeId String
+  startDate   DateTime @default(now())
+  endDate     DateTime
+  status      String   @default("active") // active, completed, failed, abandoned
+  progress    Int      @default(0) // 0-100
+  notes       String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  user      User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  challenge Challenge          @relation(fields: [challengeId], references: [id], onDelete: Cascade)
+  checkIns  ChallengeCheckIn[]
+
+  @@unique([userId, challengeId, startDate])
+  @@index([userId])
+  @@index([challengeId])
+}
+
+// Daily check-ins for challenges
+model ChallengeCheckIn {
+  id              String   @id @default(cuid())
+  userChallengeId String
+  date            DateTime @default(now())
+  successful      Boolean  @default(true)
+  notes           String?
+  createdAt       DateTime @default(now())
+
+  userChallenge UserChallenge @relation(fields: [userChallengeId], references: [id], onDelete: Cascade)
+
+  @@unique([userChallengeId, date])
+  @@index([userChallengeId])
+}
+
+// Achievement badges
+model Achievement {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  description String
+  icon        String
+  category    String   // savings, challenges, devices, mindfulness
+  requirement String   // JSON string describing requirement
+  createdAt   DateTime @default(now())
+
+  userAchievements UserAchievement[]
+}
+
+// User's earned achievements
+model UserAchievement {
+  id            String   @id @default(cuid())
+  userId        String
+  achievementId String
+  earnedAt      DateTime @default(now())
+
+  user        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  achievement Achievement @relation(fields: [achievementId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, achievementId])
+  @@index([userId])
+}
+
+// Personal goals for tech minimalism
+model Goal {
+  id          String   @id @default(cuid())
+  userId      String
+  type        String   // reduce_devices, save_money, avoid_purchases
+  target      Float    // target number or amount
+  current     Float    @default(0)
+  deadline    DateTime?
+  status      String   @default("active") // active, completed, abandoned
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
