@@ -1,0 +1,88 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = "file:./dev.db"
+}
+
+model Category {
+  id          String    @id @default(cuid())
+  name        String    @unique
+  slug        String    @unique
+  description String?
+  products    Product[]
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+}
+
+model Product {
+  id                    String         @id @default(cuid())
+  name                  String
+  slug                  String         @unique
+  brand                 String
+  model                 String
+  category              Category       @relation(fields: [categoryId], references: [id])
+  categoryId            String
+  releaseDate           DateTime
+  msrp                  Float
+  currentPrice          Float
+  imageUrl              String?
+  description           String?
+
+  // Support and longevity info
+  supportEndDate        DateTime?
+  warrantyYears         Int?
+  repairabilityScore    Int?           // 1-10 scale
+
+  // Specs stored as JSON for flexibility
+  specifications        Json
+
+  // Relations
+  priceHistory          PriceHistory[]
+  comparisonsAsProduct1 Comparison[]   @relation("Product1")
+  comparisonsAsProduct2 Comparison[]   @relation("Product2")
+
+  createdAt             DateTime       @default(now())
+  updatedAt             DateTime       @updatedAt
+}
+
+model PriceHistory {
+  id          String   @id @default(cuid())
+  product     Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  productId   String
+  price       Float
+  source      String   // e.g., "Amazon", "BestBuy", etc.
+  recordedAt  DateTime @default(now())
+
+  @@index([productId, recordedAt])
+}
+
+model Comparison {
+  id                    String   @id @default(cuid())
+  product1              Product  @relation("Product1", fields: [product1Id], references: [id])
+  product1Id            String
+  product2              Product  @relation("Product2", fields: [product2Id], references: [id])
+  product2Id            String
+
+  // Comparison results stored as JSON
+  specComparisons       Json     // Detailed spec-by-spec comparison
+  marketingGimmicks     Json     // Detected gimmicks
+  realImprovements      Json     // Actual meaningful improvements
+  upgradeRecommendation String   // "Recommended", "Not Worth It", "Marginal"
+  upgradeScore          Int      // 1-10 scale
+
+  // Year-over-year analysis (if applicable)
+  isYearOverYear        Boolean  @default(false)
+  yearOverYearAnalysis  Json?
+
+  createdAt             DateTime @default(now())
+
+  @@unique([product1Id, product2Id])
+  @@index([product1Id])
+  @@index([product2Id])
+}
