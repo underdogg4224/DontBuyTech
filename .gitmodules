@@ -1,0 +1,3 @@
+[submodule "claude-code-agents-orchestra"]
+	path = claude-code-agents-orchestra
+	url = https://github.com/0ldh/claude-code-agents-orchestra.git
